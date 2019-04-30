@@ -8,6 +8,8 @@ from scipy.io.wavfile import read, write
 import sounddevice as sd
 import matplotlib.mlab as mlab
 from multiprocessing import Pool
+from functools import partial
+__spec__ = None
 
 def get_subspace(window, unw_ss):
     ss = []
@@ -40,15 +42,15 @@ def artificial_sound(windows, uw_subspaces, num, noise_amt = 0.05):
     y += np.random.uniform(-1 * noise_amt, noise_amt, y.shape)
     return y
 
-def corr_from_inds(windows, uw_subspaces, inds):
-    window = shifted_windows[inds[1]]
-    signals = unwindowed_subspaces[inds[0]]
+def corr_from_inds(inds, windows, uw_subspaces, resid):
+    window = windows[inds[1]]
+    signals = uw_subspaces[inds[0]]
     subspace = get_subspace(window, signals)
     score = Q_corr(subspace, resid)
-    return score
+    return (inds, score)
 
 if __name__ == '__main__':
-    in_fname = "harpsichord-octave0.wav"
+    in_fname = "cello-a3.wav"
     a = read(in_fname)
     sound = np.array(a[1],dtype=float)
     if len(sound.shape) > 1:
@@ -56,20 +58,22 @@ if __name__ == '__main__':
 
     sound = sound / max(sound)
     base_hz = 32.7
-    octaves = 2
+    octaves = 1
 
     sr = 44100
-    num_harmonics = 30
+    num_harmonics = 20
     corr_thresh_quantile = 0.90
-    npts = int(sr * 0.4)
+    npts = int(sr * 2)
     sound = sound[:npts]
     domain = range(npts)
     gauss_eps = 0.001
     resid_eps = 0.05
+    num_workers = 3
+    max_iterations = 50
 
     u_grid = np.linspace(0, npts, 50)
     u_spacing = u_grid[1] - u_grid[0]
-    s_grid = np.geomspace(u_spacing, u_spacing * 4, 2)
+    s_grid = np.geomspace(u_spacing / 2, u_spacing * 2, 3)
     s_windows = []
     for s in s_grid:
         window = signal.gaussian(npts, s)
@@ -95,7 +99,7 @@ if __name__ == '__main__':
 
         centered_domain = np.array(domain) - (len(domain) // 2)
         main_signal = [np.cos(f * centered_domain * n) for n in range(1, num_harmonics + 1)]
-        # main_signal += [np.sin(f * centered_domain * n) for n in range(1, num_harmonics + 1)]
+        main_signal += [np.sin(f * centered_domain * n) for n in range(1, num_harmonics + 1)]
         unwindowed_subspaces.append(main_signal)
 
     # y = artificial_sound(shifted_windows, unwindowed_subspaces, 10, noise_amt = 0.00)
@@ -105,34 +109,33 @@ if __name__ == '__main__':
     reconstruction = np.zeros(npts)
     found_atoms = []
     scores_array = []
-    subspace_inds = list(iter.product(range(len(unwindowed_subspaces)), range(len(shifted_windows))))
+    subspace_inds = iter.product(range(len(unwindowed_subspaces)), range(len(shifted_windows)))
+    subspace_inds = np.array(list(subspace_inds))
     inds_rejected = np.zeros(len(subspace_inds))
     threshold_score = 0
     subspace_evaluations = []
     resid_norms = []
+    pool = Pool(processes=num_workers)
 
     print('beginning pursuit...')
-    for it in range(50):
+    for it in range(max_iterations):
 
         scores = np.zeros(len(subspace_inds))
         best_inds = False
+        active_subspace_inds = subspace_inds[inds_rejected != 1]
 
-        # compute correlation function Q between residual and every subspace in h_subspaces
-        for i, inds in enumerate(subspace_inds):
-            if inds_rejected[i]:
-                continue
-            # window = shifted_windows[inds[1]]
-            # signals = unwindowed_subspaces[inds[0]]
-            # subspace = get_subspace(window, signals)
-            # score = Q_corr(subspace, resid)
-            score = corr_from_inds(shifted_windows, unwindowed_subspaces, inds)
-            if score > max(scores):
-                best_inds = inds
-            scores[i] = score
+        # compute correlation score against current partial: now in parallel!
+        corr_partial = partial(corr_from_inds,
+            windows=shifted_windows,
+            uw_subspaces=unwindowed_subspaces,
+            resid=resid)
+        active_scores = pool.map(corr_partial, active_subspace_inds)
 
+        # get the index of the best subspace and the scores
+        best_inds = max(active_scores, key=lambda x: x[1])[0]
+        scores[inds_rejected == 0] = [x[1] for x in active_scores]
 
         # for all scores that are super low, set their subspaces to be ignored
-        scores_array.append(scores)
         subspace_evaluations.append(sum(inds_rejected == 0))
         if threshold_score == 0:
             threshold_score = np.quantile(scores[scores > 0], corr_thresh_quantile)
@@ -178,9 +181,10 @@ if __name__ == '__main__':
     plt.specgram(reconstruction, NFFT=256, Fs=sr, scale='dB')
     plt.show()
 
-    sd.play(np.concatenate([y, np.zeros(sr), reconstruction, np.zeros(sr), resid]), sr)
-    write('harpsichord-1.wav', sr, np.concatenate([y, np.zeros(sr), reconstruction]))
-    write('harpsichord-allatoms.wav', sr, np.concatenate(found_atoms))
+
+    # sd.play(np.concatenate([y, np.zeros(sr), reconstruction, np.zeros(sr), resid]), sr)
+    # write('harpsichord-1.wav', sr, np.concatenate([y, np.zeros(sr), reconstruction]))
+    # write('harpsichord-allatoms.wav', sr, np.concatenate(found_atoms))
     # #
     # plt.clf()
     # plt.plot(resid_norms_0noise)
