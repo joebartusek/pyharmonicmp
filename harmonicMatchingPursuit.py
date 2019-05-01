@@ -13,11 +13,10 @@ from functools import partial
 __spec__ = None
 
 def get_subspace(window, unw_ss):
+    # given a window and a list of unwindowed signals, applies the window to all signals
     ss = []
     window_inds = window > 0
     trunc_window = window[window_inds]
-    # trunc_window_shift = np.argmax(window > 0)
-    # shift = np.argmax(window) - (len(window) // 2)
     for sig in unw_ss:
         trunc_sig = sig[window_inds]
         trunc_atom = (trunc_sig * trunc_window)
@@ -28,12 +27,15 @@ def get_subspace(window, unw_ss):
     return np.array(ss)
 
 def Q_corr(subspace, residual):
+    # computes Q correlation function between subspace and residual
+    # (subspace = list of windowed signals)
     result = 0
     for x in subspace:
         result += np.abs(np.dot(x, residual)) ** 2
     return result
 
 def artificial_sound(windows, uw_subspaces, num, noise_amt = 0.05):
+    # generates some artificial sounds for testing
     y = np.zeros(npts)
     windows_use = [np.random.choice(len(windows), num), np.random.choice(len(uw_subspaces), num)]
     for wind_ind, uw_ind in np.array(windows_use).T:
@@ -44,6 +46,7 @@ def artificial_sound(windows, uw_subspaces, num, noise_amt = 0.05):
     return y
 
 def corr_from_inds(inds, windows, uw_subspaces, resid):
+    # helper function to combine Q_corr and get_subspace for parallel processing ease
     window = windows[inds[1]]
     signals = uw_subspaces[inds[0]]
     subspace = get_subspace(window, signals)
@@ -51,27 +54,27 @@ def corr_from_inds(inds, windows, uw_subspaces, resid):
     return (inds, score)
 
 if __name__ == '__main__':
-    in_fname = "cello-a3.wav"
+    in_fname = "cello-a3.wav"   # input audio file
+    base_hz = 32.7 * 2          # base frequency (omega_0)
+    octaves = 1                 # number of octaves above omega_0 to use
+    sr = 44100                  # sampling rate
+    num_harmonics = 25          # number of harmonics to use (K)
+    corr_thresh_quantile = 0.90 # percentile value for subdictionary threshold (p_thresh)
+    gauss_eps = 0.001           # truncate gaussian windows at this epsilon
+    resid_eps = 0.05            # end iteration if residual gets below this energy
+    num_workers = 3             # number of parallel processes
+    max_iterations = 50         # maximum iterations
+
+    npts = int(sr * 2)
     a = read(in_fname)
     sound = np.array(a[1],dtype=float)
     if len(sound.shape) > 1:
         sound = sound[:, 0]
-
     sound = sound / max(sound)
-    base_hz = 32.7 * 2
-    octaves = 1
-
-    sr = 44100
-    num_harmonics = 25
-    corr_thresh_quantile = 0.90
-    npts = int(sr * 2)
-    gauss_eps = 0.001
-    resid_eps = 0.05
-    num_workers = 3
-    max_iterations = 50
-
     sound = sound[:npts]
     domain = range(npts)
+
+    # setting up grids
     u_grid = np.linspace(0, npts, 50)
     u_spacing = u_grid[1] - u_grid[0]
     s_grid = np.geomspace(u_spacing / 2, u_spacing * 2, 3)
@@ -80,12 +83,7 @@ if __name__ == '__main__':
         window = signal.gaussian(npts, s)
         window[window < gauss_eps] = 0
         s_windows.append(window)
-
     f0_grid = (2 * np.pi / sr) * np.geomspace(32.7, 32.7 * (2 ** octaves), 1 + (octaves * 12))
-
-    # define harmonic subspaces
-    # project onto each harmonic subspace
-    # perform MP strictly within each subspace
 
     print('shifting/scaling windows...')
     shifted_windows = []
@@ -106,6 +104,7 @@ if __name__ == '__main__':
     # y = artificial_sound(shifted_windows, unwindowed_subspaces, 10, noise_amt = 0.00)
     y = sound
 
+    # setup
     resid = y
     reconstruction = np.zeros(npts)
     found_atoms = []
@@ -150,13 +149,12 @@ if __name__ == '__main__':
         # once the most-correlated subspace has been found, compute projection onto that subspace
         select_subspace = get_subspace(shifted_windows[best_inds[1]], unwindowed_subspaces[best_inds[0]])
         new_atom = np.zeros(npts)
-
         for mbr in select_subspace:
             factor = np.dot(mbr, resid)
             new_atom = new_atom + (factor * mbr)
 
+        # add atom to list and reconstruction, remove it from residual, log norm
         found_atoms.append(new_atom)
-
         reconstruction = reconstruction + new_atom
         new_resid = resid - new_atom
         resid_norm = np.linalg.norm(new_resid) / np.linalg.norm(y)
