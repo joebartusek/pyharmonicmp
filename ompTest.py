@@ -7,6 +7,7 @@ from importlib import reload
 from scipy.io.wavfile import read, write
 import sounddevice as sd
 import matplotlib.mlab as mlab
+import pickle
 from multiprocessing import Pool
 from functools import partial
 __spec__ = None
@@ -57,20 +58,20 @@ if __name__ == '__main__':
         sound = sound[:, 0]
 
     sound = sound / max(sound)
-    base_hz = 32.7
+    base_hz = 32.7 * 2
     octaves = 1
 
     sr = 44100
-    num_harmonics = 20
+    num_harmonics = 25
     corr_thresh_quantile = 0.90
     npts = int(sr * 2)
-    sound = sound[:npts]
-    domain = range(npts)
     gauss_eps = 0.001
     resid_eps = 0.05
     num_workers = 3
     max_iterations = 50
 
+    sound = sound[:npts]
+    domain = range(npts)
     u_grid = np.linspace(0, npts, 50)
     u_spacing = u_grid[1] - u_grid[0]
     s_grid = np.geomspace(u_spacing / 2, u_spacing * 2, 3)
@@ -99,7 +100,7 @@ if __name__ == '__main__':
 
         centered_domain = np.array(domain) - (len(domain) // 2)
         main_signal = [np.cos(f * centered_domain * n) for n in range(1, num_harmonics + 1)]
-        main_signal += [np.sin(f * centered_domain * n) for n in range(1, num_harmonics + 1)]
+        # main_signal += [np.sin(f * centered_domain * n) for n in range(1, num_harmonics + 1)]
         unwindowed_subspaces.append(main_signal)
 
     # y = artificial_sound(shifted_windows, unwindowed_subspaces, 10, noise_amt = 0.00)
@@ -181,40 +182,7 @@ if __name__ == '__main__':
     plt.specgram(reconstruction, NFFT=256, Fs=sr, scale='dB')
     plt.show()
 
-
-    # sd.play(np.concatenate([y, np.zeros(sr), reconstruction, np.zeros(sr), resid]), sr)
-    # write('harpsichord-1.wav', sr, np.concatenate([y, np.zeros(sr), reconstruction]))
+    sd.play(np.concatenate([y, np.zeros(sr), reconstruction, np.zeros(sr), resid]), sr)
+    write('{}-reconstruction.wav'.format(in_fname), sr, np.concatenate([y, np.zeros(sr), reconstruction]))
+    pickle.dump(resid_norms, open('{}-resids.pik'.format(in_fname), 'wb'))
     # write('harpsichord-allatoms.wav', sr, np.concatenate(found_atoms))
-    # #
-    # plt.clf()
-    # plt.plot(resid_norms_0noise)
-    # plt.plot(resid_norms_01noise)
-    # plt.plot(resid_norms_03noise)
-    # plt.plot(resid_norms_05noise)
-    # plt.xlabel('Iterations')
-    # plt.ylabel('Norm Residual / Norm Input')
-    # plt.legend(['No noise added', 'Added white noise * 0.01', 'Added white noise * 0.03', 'Added white noise * 0.05'])
-    # plt.savefig('noisenorms.png', bbox_inches='tight', dpi=300)
-    # plt.show()
-    #
-    # plt.clf()
-    # plt.plot(resid_norms_50)
-    # plt.plot(resid_norms_75)
-    # plt.plot(resid_norms_90)
-    # plt.plot(resid_norms_95)
-    # plt.xlabel('Iterations')
-    # plt.ylabel('Norm Residual / Norm Input')
-    # plt.legend(['Threshold at 50%', 'Threshold at 75%', 'Threshold at 90%', 'Threshold at 95%'])
-    # plt.savefig('residualnorms.png', bbox_inches='tight', dpi=300)
-    # plt.show()
-    #
-    # plt.clf()
-    # plt.plot(np.cumsum(subspace_evaluations_50))
-    # plt.plot(np.cumsum(subspace_evaluations_75))
-    # plt.plot(np.cumsum(subspace_evaluations_90))
-    # plt.plot(np.cumsum(subspace_evaluations_95))
-    # plt.xlabel('Iterations')
-    # plt.ylabel('Num. Evaluations of correlation function')
-    # plt.legend(['Threshold at 50%', 'Threshold at 75%', 'Threshold at 90%', 'Threshold at 95%'])
-    # plt.savefig('evalfunc.png', bbox_inches='tight', dpi=300)
-    # plt.show()
