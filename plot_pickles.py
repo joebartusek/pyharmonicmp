@@ -2,12 +2,13 @@ import matplotlib.mlab as mlab
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import read, write
 import numpy as np
+import pickle
 
 # in_fname = "horn-a#3-50thresh.wav"
 # a = read(in_fname)
 # sound = np.array(a[1],dtype=float)
 #
-# 
+#
 # Pxx, freq, t = mlab.specgram(sound, Fs=a[0])
 # plt.clf()
 # ha = plt.subplot(111)
@@ -30,7 +31,7 @@ plt.plot(oboe)
 plt.plot(horn)
 plt.xlabel('Iterations')
 plt.ylabel('Norm Residual / Norm Input')
-plt.legend(['bassoon', 'clarinet', 'cello', 'horn', 'oboe'])
+plt.legend(['Bassoon (A#3)', 'Clarinet (B3)', 'Cello (A3)', 'Horn (A#3)', 'Oboe (A#3)'])
 plt.savefig('instrumentnorms.png', bbox_inches='tight', dpi=300)
 plt.show()
 
